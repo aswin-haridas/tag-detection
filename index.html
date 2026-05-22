@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Tag Data Viewer</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { margin: 20px; font-family: sans-serif; background: #fafafa; }
+    #chart { width: 100%; max-width: 1200px; margin: 0 auto; }
+    .controls { text-align: center; margin-bottom: 10px; }
+    .controls label { margin: 0 12px; font-size: 13px; }
+    .legend { display: flex; justify-content: center; gap: 20px; margin-bottom: 10px; font-size: 13px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+    .legend-item .swatch { width: 14px; height: 3px; border-radius: 2px; }
+    .tooltip {
+      position: absolute; background: rgba(0,0,0,.8); color: #fff; padding: 6px 10px;
+      border-radius: 4px; font-size: 12px; pointer-events: none; display: none;
+    }
+  </style>
+</head>
+<body>
+<div id="chart">
+  <div class="controls">
+    <label><input type="checkbox" class="toggle" data-key="x" checked> X</label>
+    <label><input type="checkbox" class="toggle" data-key="y" checked> Y</label>
+    <label><input type="checkbox" class="toggle" data-key="z" checked> Z</label>
+    <label><input type="checkbox" class="toggle" data-key="rssi" checked> RSSI</label>
+    <button id="resetZoom" style="margin-left:16px;font-size:12px">Reset Zoom</button>
+  </div>
+  <div class="legend" id="legend"></div>
+  <svg width="100%" height="500"></svg>
+  <div class="tooltip" id="tooltip"></div>
+</div>
+<script>
+d3.text('data.jsonl').then(text => {
+  const records = text.trim().split('\n').filter(Boolean).map(JSON.parse);
+  const data = records.map(r => ({
+    t: new Date(r.timestamp),
+    x: r.x, y: r.y, z: r.z, rssi: r.rawRssi,
+    label: r.timestamp.replace('T',' ').replace(/\.\d+Z/,'')
+  }));
+
+  const margin = { top: 30, right: 80, bottom: 50, left: 60 };
+  const svg = d3.select('svg');
+  const bb = svg.node().getBoundingClientRect();
+  const W = bb.width - margin.left - margin.right;
+  const H = 500 - margin.top - margin.bottom;
+  const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  const xAll = d3.scaleTime()
+    .domain(d3.extent(data, d => d.t))
+    .range([0, W]);
+
+  const yL = d3.scaleLinear()
+    .domain([d3.min(data, d => Math.min(d.x, d.y, d.z)) - 10,
+             d3.max(data, d => Math.max(d.x, d.y, d.z)) + 10])
+    .range([H, 0]);
+
+  const yR = d3.scaleLinear()
+    .domain([d3.min(data, d => d.rssi) - 5, d3.max(data, d => d.rssi) + 5])
+    .range([H, 0]);
+
+  const series = [
+    { key: 'x',    label: 'X',    color: '#e74c3c', y: yL },
+    { key: 'y',    label: 'Y',    color: '#2ecc71', y: yL },
+    { key: 'z',    label: 'Z',    color: '#3498db', y: yL },
+    { key: 'rssi', label: 'RSSI', color: '#f39c12', y: yR },
+  ];
+
+  const xAxisG = g.append('g').attr('transform', `translate(0,${H})`);
+  const yAxisLG = g.append('g');
+  const yAxisRG = g.append('g').attr('transform', `translate(${W},0)`);
+
+  g.append('text').attr('x', -35).attr('y', 15).attr('fill','#555').attr('font-size',12).text('Position');
+  g.append('text').attr('x', W + 45).attr('y', 15).attr('fill','#555').attr('font-size',12).text('RSSI');
+
+  g.append('defs').append('clipPath').attr('id','clip')
+    .append('rect').attr('width',W).attr('height',H);
+
+  const chartArea = g.append('g').attr('clip-path','url(#clip)');
+
+  function drawLines(xS) {
+    series.forEach(s => {
+      const gen = d3.line().x(d => xS(d.t)).y(d => s.y(d[s.key]));
+      chartArea.select(`.line-${s.key}`).attr('d', gen(data));
+    });
+  }
+
+  series.forEach(s => {
+    chartArea.append('path')
+      .attr('class', `line-path line-${s.key}`)
+      .attr('fill', 'none')
+      .attr('stroke', s.color)
+      .attr('stroke-width', 1.5);
+  });
+
+  let xCur = xAll;
+  function updateChart(xS) {
+    xCur = xS;
+    xAxisG.call(d3.axisBottom(xS));
+    drawLines(xS);
+  }
+  updateChart(xAll);
+
+  // zoom
+  const zoom = d3.zoom()
+    .scaleExtent([1, 100])
+    .extent([[0,0],[W,H]])
+    .on('zoom', event => {
+      const xS = event.transform.rescaleX(xAll);
+      xCur = xS;
+      xAxisG.call(d3.axisBottom(xS));
+      drawLines(xS);
+    });
+  svg.call(zoom);
+
+  d3.select('#resetZoom').on('click', () => {
+    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+    updateChart(xAll);
+  });
+
+  // tooltip
+  const tooltip = d3.select('#tooltip');
+  const bisect = d3.bisector(d => d.t).left;
+
+  chartArea.append('rect')
+    .attr('width',W).attr('height',H).attr('fill','none').attr('pointer-events','all')
+    .on('mousemove', event => {
+      const mx = d3.pointer(event)[0];
+      const xt = xCur.invert(mx);
+      const i = bisect(data, xt);
+      if (i <= 0 || i >= data.length) { tooltip.style('display','none'); return; }
+      const d = data[i];
+      tooltip.style('display','block')
+        .style('left', (event.pageX + 12) + 'px')
+        .style('top', (event.pageY - 28) + 'px')
+        .html(`<strong>${d.label}</strong><br>X: ${d.x} &nbsp; Y: ${d.y} &nbsp; Z: ${d.z}<br>RSSI: ${d.rssi}`);
+    })
+    .on('mouseleave', () => tooltip.style('display','none'));
+
+  // legend + toggles
+  const legendDiv = d3.select('#legend');
+  series.forEach(s => {
+    const item = legendDiv.append('div').attr('class','legend-item');
+    item.append('div').attr('class','swatch').style('background',s.color);
+    item.append('span').text(s.label);
+    item.on('click', () => {
+      const el = chartArea.select(`.line-${s.key}`);
+      const vis = el.attr('visibility') === 'hidden';
+      el.attr('visibility', vis ? 'visible' : 'hidden');
+      d3.select(`.toggle[data-key="${s.key}"]`).property('checked', vis);
+    });
+  });
+
+  d3.selectAll('.toggle').on('change', function() {
+    const k = this.dataset.key;
+    chartArea.select(`.line-${k}`).attr('visibility', this.checked ? 'visible' : 'hidden');
+  });
+});
+</script>
+</body>
+</html>
