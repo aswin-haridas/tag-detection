@@ -6,7 +6,11 @@ const PORT = 8080;
 const dir = __dirname;
 
 http.createServer((req, res) => {
-  const file = path.join(dir, req.url === '/' ? 'index.html' : req.url);
+  let url = req.url;
+  if (url === '/3d' || url === '/3d/') {
+    url = '/3d.html';
+  }
+  const file = path.join(dir, url === '/' ? 'index.html' : url);
   const ext = path.extname(file);
   const types = { '.html': 'text/html', '.jsonl': 'text/plain', '.js': 'application/javascript' };
   fs.readFile(file, (err, data) => {

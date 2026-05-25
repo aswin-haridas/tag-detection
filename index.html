@@ -1,221 +1,266 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8">
   <title>Tag Data Viewer</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    body { margin: 20px; font-family: sans-serif; background: #fafafa; }
-    #chart { width: 100%; margin: 10px auto; }
-    .controls { text-align: center; margin-bottom: 10px; }
-    .controls label { margin: 0 10px; font-size: 13px; }
-    .legend { display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; font-size: 13px; }
-    .legend-item { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-    .legend-item .swatch { width: 14px; height: 3px; border-radius: 2px; }
+    body {
+      margin: 20px;
+      font-family: sans-serif;
+      background: #fafafa;
+    }
+
+    #chart {
+      width: 100%;
+      margin: 10px auto;
+    }
+
+    .controls {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .controls label {
+      margin: 0 10px;
+      font-size: 13px;
+    }
+
+    .legend {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    .legend-item .swatch {
+      width: 14px;
+      height: 3px;
+      border-radius: 2px;
+    }
+
     .tooltip {
-      position: absolute; background: rgba(0,0,0,.85); color: #fff; padding: 6px 10px;
-      border-radius: 4px; font-size: 12px; pointer-events: none; display: none;
+      position: absolute;
+      background: rgba(0, 0, 0, .85);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      display: none;
     }
   </style>
 </head>
+
 <body>
-<div id="chart">
-  <div class="controls">
-    <label><input type="checkbox" class="toggle" data-key="x" checked> X</label>
-    <label><input type="checkbox" class="toggle" data-key="y" checked> Y</label>
-    <label><input type="checkbox" class="toggle" data-key="z" checked> Z</label>
-    <label><input type="checkbox" class="toggle" data-key="svm" checked> SVM</label>
-    <label><input type="checkbox" class="toggle" data-key="rssi" checked> RSSI</label>
-    <label><input type="checkbox" class="toggle" data-key="ema01" checked> EMA 0.1</label>
-    <label><input type="checkbox" class="toggle" data-key="ema04" checked> EMA 0.4</label>
-    <label><input type="checkbox" class="toggle" data-key="medGauss" checked> Med+Gauss</label>
-    <label><input type="checkbox" class="toggle" data-key="kalman" checked> Kalman</label>
-    <button id="resetZoom" style="margin-left:8px;font-size:12px">Reset Zoom</button>
-    <button id="clearFilters" style="margin-left:8px;font-size:12px">Clear Filters</button>
+  <div id="chart">
+    <div class="controls">
+      <label><input type="checkbox" class="toggle" data-key="x" checked> X</label>
+      <label><input type="checkbox" class="toggle" data-key="y" checked> Y</label>
+      <label><input type="checkbox" class="toggle" data-key="z" checked> Z</label>
+      <label><input type="checkbox" class="toggle" data-key="svm" checked> SVM</label>
+      <label><input type="checkbox" class="toggle" data-key="rssi" checked> RSSI</label>
+      <label><input type="checkbox" class="toggle" data-key="ema01" checked> EMA 0.1</label>
+      <label><input type="checkbox" class="toggle" data-key="ema04" checked> EMA 0.4</label>
+      <label><input type="checkbox" class="toggle" data-key="medGauss" checked> Med+Gauss</label>
+      <label><input type="checkbox" class="toggle" data-key="kalman" checked> Kalman</label>
+      <button id="resetZoom" style="margin-left:8px;font-size:12px">Reset Zoom</button>
+      <button id="clearFilters" style="margin-left:8px;font-size:12px">Clear Filters</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <svg width="100%" height="550"></svg>
+    <div class="tooltip" id="tooltip"></div>
   </div>
-  <div class="legend" id="legend"></div>
-  <svg width="100%" height="550"></svg>
-  <div class="tooltip" id="tooltip"></div>
-</div>
 
-<script>
-function gaussKernel(sigma, size) {
-  const half = Math.floor(size / 2);
-  const kernel = [];
-  let sum = 0;
-  for (let i = -half; i <= half; i++) {
-    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel.push(v); sum += v;
-  }
-  return kernel.map(k => k / sum);
-}
-function median(arr) {
-  const s = [...arr].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)];
-}
-
-d3.text('data.jsonl').then(text => {
-  const records = text.trim().split('\n').filter(Boolean).map(JSON.parse);
-  const data = records.map(r => ({
-    t: new Date(r.timestamp),
-    x: r.x, y: r.y, z: -r.z, rssi: r.rawRssi,
-    svm: Math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z),
-    label: r.timestamp.replace('T',' ').replace(/\.\d+Z/,'')
-  }));
-
-  // --- EMA filters ---
-  [0.1, 0.4].forEach(a => {
-    const key = a === 0.1 ? 'ema01' : 'ema04';
-    let prev = data[0].rssi;
-    data.forEach((d, i) => {
-      if (i === 0) { d[key] = prev; return; }
-      prev = a * d.rssi + (1 - a) * prev;
-      d[key] = prev;
-    });
-  });
-
-  // --- Median (5) + Gaussian ---
-  const winSize = 5;
-  data.forEach((d, i) => {
-    const half = Math.floor(winSize / 2);
-    const win = [];
-    for (let j = i - half; j <= i + half; j++) {
-      if (j >= 0 && j < data.length) win.push(data[j].rssi);
+  <script>
+    function gaussKernel(sigma, size) {
+      const half = Math.floor(size / 2);
+      const kernel = [];
+      let sum = 0;
+      for (let i = -half; i <= half; i++) {
+        const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+        kernel.push(v); sum += v;
+      }
+      return kernel.map(k => k / sum);
     }
-    d.median = median(win);
-  });
-  const gk = gaussKernel(1, 5);
-  data.forEach((d, i) => {
-    let sum = 0;
-    const half = Math.floor(gk.length / 2);
-    for (let j = 0; j < gk.length; j++) {
-      const idx = i - half + j;
-      if (idx >= 0 && idx < data.length) sum += gk[j] * data[idx].median;
+    function median(arr) {
+      const s = [...arr].sort((a, b) => a - b);
+      return s[Math.floor(s.length / 2)];
     }
-    d.medGauss = sum;
-  });
 
-  // --- 1D Kalman ---
-  let x = data[0].rssi, P = 1, Q = 0.5, R = 4;
-  data.forEach((d, i) => {
-    if (i === 0) { d.kalman = x; return; }
-    P = P + Q;
-    const K = P / (P + R);
-    x = x + K * (d.rssi - x);
-    P = (1 - K) * P;
-    d.kalman = x;
-  });
+    d3.text('data.jsonl').then(text => {
+      const records = text.trim().split('\n').filter(Boolean).map(JSON.parse);
+      const data = records.map(r => ({
+        t: new Date(r.timestamp),
+        x: r.x, y: r.y, z: -r.z, rssi: r.rawRssi,
+        svm: Math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z),
+        label: r.timestamp.replace('T', ' ').replace(/\.\d+Z/, '')
+      }));
 
-  // ===== CHART =====
-  const margin = { top: 30, right: 80, bottom: 50, left: 60 };
-  const svg = d3.select('svg');
-  const bb = svg.node().getBoundingClientRect();
-  const W = bb.width - margin.left - margin.right;
-  const H = 550 - margin.top - margin.bottom;
-  const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+      // --- EMA filters ---
+      [0.1, 0.4].forEach(a => {
+        const key = a === 0.1 ? 'ema01' : 'ema04';
+        let prev = data[0].rssi;
+        data.forEach((d, i) => {
+          if (i === 0) { d[key] = prev; return; }
+          prev = a * d.rssi + (1 - a) * prev;
+          d[key] = prev;
+        });
+      });
 
-  const xAll = d3.scaleTime()
-    .domain(d3.extent(data, d => d.t))
-    .range([0, W]);
+      // --- Median (5) + Gaussian ---
+      const winSize = 5;
+      data.forEach((d, i) => {
+        const half = Math.floor(winSize / 2);
+        const win = [];
+        for (let j = i - half; j <= i + half; j++) {
+          if (j >= 0 && j < data.length) win.push(data[j].rssi);
+        }
+        d.median = median(win);
+      });
+      const gk = gaussKernel(1, 5);
+      data.forEach((d, i) => {
+        let sum = 0;
+        const half = Math.floor(gk.length / 2);
+        for (let j = 0; j < gk.length; j++) {
+          const idx = i - half + j;
+          if (idx >= 0 && idx < data.length) sum += gk[j] * data[idx].median;
+        }
+        d.medGauss = sum;
+      });
 
-  const yL = d3.scaleLinear()
-    .domain([d3.min(data, d => Math.min(d.x, d.y)) - 10,
-             d3.max(data, d => Math.max(d.svm, d.z)) + 10])
-    .range([H, 0]);
+      // --- 1D Kalman ---
+      let x = data[0].rssi, P = 1, Q = 0.5, R = 4;
+      data.forEach((d, i) => {
+        if (i === 0) { d.kalman = x; return; }
+        P = P + Q;
+        const K = P / (P + R);
+        x = x + K * (d.rssi - x);
+        P = (1 - K) * P;
+        d.kalman = x;
+      });
 
-  const rssiKeys = ['rssi', 'ema01', 'ema04', 'medGauss', 'kalman'];
-  const yR = d3.scaleLinear()
-    .domain([d3.min(data, d => Math.min(...rssiKeys.map(k => d[k]))),
-             d3.max(data, d => Math.max(...rssiKeys.map(k => d[k])))])
-    .range([H, 0]);
+      // ===== CHART =====
+      const margin = { top: 30, right: 80, bottom: 50, left: 60 };
+      const svg = d3.select('svg');
+      const bb = svg.node().getBoundingClientRect();
+      const W = bb.width - margin.left - margin.right;
+      const H = 550 - margin.top - margin.bottom;
+      const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-  const series = [
-    { key: 'x',       label: 'X',         color: '#e74c3c', y: yL },
-    { key: 'y',       label: 'Y',         color: '#2ecc71', y: yL },
-    { key: 'z',       label: 'Z',         color: '#3498db', y: yL },
-    { key: 'svm',     label: 'SVM',       color: '#9b59b6', y: yL },
-    { key: 'rssi',    label: 'RSSI',      color: '#aaa',    y: yR },
-    { key: 'ema01',  label: 'EMA 0.1',   color: '#1abc9c', y: yR },
-    { key: 'ema04',  label: 'EMA 0.4',   color: '#e67e22', y: yR },
-    { key: 'medGauss',label: 'Med+Gauss', color: '#8e44ad', y: yR },
-    { key: 'kalman',  label: 'Kalman',    color: '#e74c3c', y: yR },
-  ];
+      const xAll = d3.scaleTime()
+        .domain(d3.extent(data, d => d.t))
+        .range([0, W]);
 
-  const xAxisG = g.append('g').attr('transform', `translate(0,${H})`);
-  g.append('g').call(d3.axisLeft(yL));
-  g.append('g').attr('transform', `translate(${W},0)`).call(d3.axisRight(yR));
-  g.append('text').attr('x', -35).attr('y', 15).attr('fill','#555').attr('font-size',12).text('Position');
-  g.append('text').attr('x', W + 45).attr('y', 15).attr('fill','#555').attr('font-size',12).text('RSSI / Filters');
+      const yL = d3.scaleLinear()
+        .domain([d3.min(data, d => Math.min(d.x, d.y)) - 10,
+        d3.max(data, d => Math.max(d.svm, d.z)) + 10])
+        .range([H, 0]);
 
-  g.append('defs').append('clipPath').attr('id','clip')
-    .append('rect').attr('width',W).attr('height',H);
-  const chartArea = g.append('g').attr('clip-path','url(#clip)');
+      const rssiKeys = ['rssi', 'ema01', 'ema04', 'medGauss', 'kalman'];
+      const yR = d3.scaleLinear()
+        .domain([d3.min(data, d => Math.min(...rssiKeys.map(k => d[k]))),
+        d3.max(data, d => Math.max(...rssiKeys.map(k => d[k])))])
+        .range([H, 0]);
 
-  function drawLines(xS) {
-    series.forEach(s => {
-      const gen = d3.line().x(d => xS(d.t)).y(d => s.y(d[s.key]));
-      chartArea.select(`.line-${CSS.escape(s.key)}`).attr('d', gen(data));
+      const series = [
+        { key: 'x', label: 'X', color: '#e74c3c', y: yL },
+        { key: 'y', label: 'Y', color: '#2ecc71', y: yL },
+        { key: 'z', label: 'Z', color: '#3498db', y: yL },
+        { key: 'svm', label: 'SVM', color: '#9b59b6', y: yL },
+        { key: 'rssi', label: 'RSSI', color: '#aaa', y: yR },
+        { key: 'ema01', label: 'EMA 0.1', color: '#1abc9c', y: yR },
+        { key: 'ema04', label: 'EMA 0.4', color: '#e67e22', y: yR },
+        { key: 'medGauss', label: 'Med+Gauss', color: '#8e44ad', y: yR },
+        { key: 'kalman', label: 'Kalman', color: '#e74c3c', y: yR },
+      ];
+
+      const xAxisG = g.append('g').attr('transform', `translate(0,${H})`);
+      g.append('g').call(d3.axisLeft(yL));
+      g.append('g').attr('transform', `translate(${W},0)`).call(d3.axisRight(yR));
+      g.append('text').attr('x', -35).attr('y', 15).attr('fill', '#555').attr('font-size', 12).text('Position');
+      g.append('text').attr('x', W + 45).attr('y', 15).attr('fill', '#555').attr('font-size', 12).text('RSSI / Filters');
+
+      g.append('defs').append('clipPath').attr('id', 'clip')
+        .append('rect').attr('width', W).attr('height', H);
+      const chartArea = g.append('g').attr('clip-path', 'url(#clip)');
+
+      function drawLines(xS) {
+        series.forEach(s => {
+          const gen = d3.line().x(d => xS(d.t)).y(d => s.y(d[s.key]));
+          chartArea.select(`.line-${CSS.escape(s.key)}`).attr('d', gen(data));
+        });
+      }
+
+      series.forEach(s => {
+        chartArea.append('path')
+          .attr('class', `line-path line-${CSS.escape(s.key)}`)
+          .attr('fill', 'none').attr('stroke', s.color).attr('stroke-width', s.key === 'rssi' ? 0.8 : 1.8)
+          .attr('stroke-dasharray', s.dash || 'none');
+      });
+
+      let xCur = xAll;
+      function updateChart(xS) { xCur = xS; xAxisG.call(d3.axisBottom(xS)); drawLines(xS); }
+      updateChart(xAll);
+
+      const zoom = d3.zoom()
+        .scaleExtent([1, 100]).extent([[0, 0], [W, H]])
+        .on('zoom', event => updateChart(event.transform.rescaleX(xAll)));
+      svg.call(zoom);
+      d3.select('#clearFilters').on('click', () => {
+        ['ema01', 'ema04', 'medGauss', 'kalman'].forEach(k => {
+          chartArea.select(`.line-${CSS.escape(k)}`).attr('visibility', 'hidden');
+          d3.select(`.toggle[data-key="${k}"]`).property('checked', false);
+        });
+      });
+      d3.select('#resetZoom').on('click', () => {
+        svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+        updateChart(xAll);
+      });
+
+      const tooltip = d3.select('#tooltip');
+      const bisect = d3.bisector(d => d.t).left;
+      chartArea.append('rect').attr('width', W).attr('height', H).attr('fill', 'none').attr('pointer-events', 'all')
+        .on('mousemove', event => {
+          const mx = d3.pointer(event)[0]; const xt = xCur.invert(mx); const i = bisect(data, xt);
+          if (i <= 0 || i >= data.length) { tooltip.style('display', 'none'); return; }
+          const d = data[i];
+          tooltip.style('display', 'block').style('left', (event.pageX + 12) + 'px').style('top', (event.pageY - 28) + 'px')
+            .html(`<strong>${d.label}</strong><br>X: ${d.x} &nbsp; Y: ${d.y} &nbsp; Z: ${d.z}<br>SVM: ${d.svm.toFixed(1)} &nbsp; RSSI: ${d.rssi}<br>EMA0.1: ${d.ema01.toFixed(1)} &nbsp; EMA0.4: ${d.ema04.toFixed(1)}<br>Med+Gauss: ${d.medGauss.toFixed(1)} &nbsp; Kalman: ${d.kalman.toFixed(1)}`);
+        })
+        .on('mouseleave', () => tooltip.style('display', 'none'));
+
+      const legendDiv = d3.select('#legend');
+      series.forEach(s => {
+        const item = legendDiv.append('div').attr('class', 'legend-item');
+        item.append('div').attr('class', 'swatch').style('background', s.color);
+        item.append('span').text(s.label);
+        item.on('click', () => {
+          const el = chartArea.select(`.line-${CSS.escape(s.key)}`);
+          const vis = el.attr('visibility') === 'hidden';
+          el.attr('visibility', vis ? 'visible' : 'hidden');
+          d3.select(`.toggle[data-key="${s.key}"]`).property('checked', vis);
+        });
+      });
+      d3.selectAll('.toggle').on('change', function () {
+        chartArea.select(`.line-${CSS.escape(this.dataset.key)}`).attr('visibility', this.checked ? 'visible' : 'hidden');
+      });
     });
-  }
-
-  series.forEach(s => {
-    chartArea.append('path')
-      .attr('class', `line-path line-${CSS.escape(s.key)}`)
-      .attr('fill', 'none').attr('stroke', s.color).attr('stroke-width', s.key === 'rssi' ? 0.8 : 1.8)
-      .attr('stroke-dasharray', s.dash || 'none');
-  });
-
-  let xCur = xAll;
-  function updateChart(xS) { xCur = xS; xAxisG.call(d3.axisBottom(xS)); drawLines(xS); }
-  updateChart(xAll);
-
-  const zoom = d3.zoom()
-    .scaleExtent([1, 100]).extent([[0,0],[W,H]])
-    .on('zoom', event => updateChart(event.transform.rescaleX(xAll)));
-  svg.call(zoom);
-  d3.select('#clearFilters').on('click', () => {
-    ['ema01','ema04','medGauss','kalman'].forEach(k => {
-      chartArea.select(`.line-${CSS.escape(k)}`).attr('visibility', 'hidden');
-      d3.select(`.toggle[data-key="${k}"]`).property('checked', false);
-    });
-  });
-  d3.select('#resetZoom').on('click', () => {
-    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
-    updateChart(xAll);
-  });
-
-  const tooltip = d3.select('#tooltip');
-  const bisect = d3.bisector(d => d.t).left;
-  chartArea.append('rect').attr('width',W).attr('height',H).attr('fill','none').attr('pointer-events','all')
-    .on('mousemove', event => {
-      const mx = d3.pointer(event)[0]; const xt = xCur.invert(mx); const i = bisect(data, xt);
-      if (i <= 0 || i >= data.length) { tooltip.style('display','none'); return; }
-      const d = data[i];
-      tooltip.style('display','block').style('left',(event.pageX+12)+'px').style('top',(event.pageY-28)+'px')
-        .html(`<strong>${d.label}</strong><br>X: ${d.x} &nbsp; Y: ${d.y} &nbsp; Z: ${d.z}<br>SVM: ${d.svm.toFixed(1)} &nbsp; RSSI: ${d.rssi}<br>EMA0.1: ${d.ema01.toFixed(1)} &nbsp; EMA0.4: ${d.ema04.toFixed(1)}<br>Med+Gauss: ${d.medGauss.toFixed(1)} &nbsp; Kalman: ${d.kalman.toFixed(1)}`);
-    })
-    .on('mouseleave', () => tooltip.style('display','none'));
-
-  const legendDiv = d3.select('#legend');
-  series.forEach(s => {
-    const item = legendDiv.append('div').attr('class','legend-item');
-    item.append('div').attr('class','swatch').style('background',s.color);
-    item.append('span').text(s.label);
-    item.on('click', () => {
-      const el = chartArea.select(`.line-${CSS.escape(s.key)}`);
-      const vis = el.attr('visibility') === 'hidden';
-      el.attr('visibility', vis ? 'visible' : 'hidden');
-      d3.select(`.toggle[data-key="${s.key}"]`).property('checked', vis);
-    });
-  });
-  d3.selectAll('.toggle').on('change', function() {
-    chartArea.select(`.line-${CSS.escape(this.dataset.key)}`).attr('visibility', this.checked ? 'visible' : 'hidden');
-  });
-});
-</script>
+  </script>
 </body>
+
 </html>
-});
 </script>
 </body>
+
 </html>

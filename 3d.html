@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tag 3D Orientation & Projections Tracker</title>
+  
+  <!-- Premium Fonts & Icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  
+  <!-- Visualization Libraries -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #05070f;
+      --panel-bg: rgba(13, 17, 30, 0.75);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-green: #10b981;
+      
+      /* Neon accents for devices */
+      --dev-cyan: #00f0ff;
+      --dev-cyan-glow: rgba(0, 240, 255, 0.4);
+      --dev-pink: #ff007f;
+      --dev-pink-glow: rgba(255, 0, 127, 0.4);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header styling */
+    header {
+      background: rgba(8, 10, 18, 0.8);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--panel-border);
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, var(--dev-cyan), var(--dev-pink));
+      box-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+      animation: pulse 2s infinite alternate;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 0 8px rgba(0, 240, 255, 0.4); }
+      100% { transform: scale(1.1); box-shadow: 0 0 16px rgba(255, 0, 127, 0.6); }
+    }
+
+    .brand-title h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: linear-gradient(to right, #ffffff, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-title p {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 20px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent-green);
+      animation: blink 1.2s infinite;
+    }
+
+    @keyframes blink {
+      0% { opacity: 0.3; }
+      50% { opacity: 1; }
+      100% { opacity: 0.3; }
+    }
+
+    .nav-btn {
+      font-family: 'Outfit', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--panel-border);
+      padding: 6px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .nav-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+
+    /* Main Dashboard Layout */
+    .dashboard {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 16px;
+      padding: 16px;
+      overflow: hidden;
+      background: radial-gradient(circle at 30% 30%, #0c1020 0%, #05070f 80%);
+    }
+
+    @media (max-width: 1200px) {
+      .dashboard {
+        grid-template-columns: 1fr;
+        overflow-y: auto;
+      }
+      body {
+        overflow-y: auto;
+      }
+    }
+
+    /* Left Side: 3D Scene + Controls */
+    .view-left {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow: hidden;
+    }
+
+    .scene-container {
+      flex: 1;
+      position: relative;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      overflow: hidden;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    #viewport-3d {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Floating orientation indicator label on 3D viewport */
+    .viewport-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      pointer-events: none;
+      background: rgba(5, 7, 15, 0.6);
+      border: 1px solid var(--panel-border);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .viewport-overlay strong {
+      color: var(--text-main);
+    }
+
+    /* Controls Panel under the 3D Scene */
+    .controls-panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 16px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .scrubber-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .play-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--dev-cyan), #00aaff);
+      border: none;
+      color: #05070f;
+      font-size: 16px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+      transition: all 0.2s ease;
+    }
+
+    .play-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 18px rgba(0, 240, 255, 0.6);
+    }
+
+    .scrubber-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .scrubber-slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #1e293b;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .scrubber-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--text-main);
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    .scrubber-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .scrubber-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .controls-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .control-item select, .control-item input[type="range"] {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--panel-border);
+      color: var(--text-main);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .control-item select:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    /* Checkbox list styled nicely */
+    .device-selectors {
+      display: flex;
+      gap: 14px;
+    }
+
+    .dev-selector {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .dev-selector input {
+      display: none;
+    }
+
+    .dev-selector .checkbox-box {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border: 1px solid var(--panel-border);
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .dev-selector.dev-a .checkbox-box { border-color: rgba(0, 240, 255, 0.4); }
+    .dev-selector.dev-b .checkbox-box { border-color: rgba(255, 0, 127, 0.4); }
+
+    .dev-selector input:checked + .checkbox-box::after {
+      content: '';
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      top: 2px;
+      left: 2px;
+    }
+
+    .dev-selector.dev-a input:checked + .checkbox-box {
+      background: rgba(0, 240, 255, 0.15);
+      border-color: var(--dev-cyan);
+      box-shadow: 0 0 6px var(--dev-cyan-glow);
+    }
+    .dev-selector.dev-a input:checked + .checkbox-box::after {
+      background-color: var(--dev-cyan);
+    }
+
+    .dev-selector.dev-b input:checked + .checkbox-box {
+      background: rgba(255, 0, 127, 0.15);
+      border-color: var(--dev-pink);
+      box-shadow: 0 0 6px var(--dev-pink-glow);
+    }
+    .dev-selector.dev-b input:checked + .checkbox-box::after {
+      background-color: var(--dev-pink);
+    }
+
+    /* Right Side: Projections (Topdown, Front, Side) + Current Metrics */
+    .view-right {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .panel-right {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 16px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 12px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      padding-bottom: 6px;
+    }
+
+    .panel-title span {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: none;
+      font-weight: 400;
+    }
+
+    /* SVG Projections Panels */
+    .projections-container {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .projection-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: rgba(15, 23, 42, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      border-radius: 10px;
+      padding: 8px;
+    }
+
+    .projection-view-header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 0 4px 6px 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+      margin-bottom: 6px;
+    }
+
+    /* Live Metrics Panel */
+    .metrics-container {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .device-metrics-card {
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(15, 23, 42, 0.4);
+    }
+
+    .device-metrics-card.dev-a { border-left: 3px solid var(--dev-cyan); }
+    .device-metrics-card.dev-b { border-left: 3px solid var(--dev-pink); }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .card-header h3 {
+      font-size: 13px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .card-header.dev-a h3 { color: var(--dev-cyan); }
+    .card-header.dev-b h3 { color: var(--dev-pink); }
+
+    .active-badge {
+      font-size: 9px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--panel-border);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+
+    .card-header.active .active-badge {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: var(--accent-green);
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .metric-box {
+      background: rgba(5, 7, 15, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.02);
+      border-radius: 8px;
+      padding: 6px;
+      text-align: center;
+    }
+
+    .metric-lbl {
+      font-size: 9px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+
+    .metric-val {
+      font-size: 13px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .metrics-row-bottom {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1.1fr;
+      gap: 8px;
+    }
+
+    /* Custom scrollbar */
+    .view-right::-webkit-scrollbar {
+      width: 4px;
+    }
+    .view-right::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .view-right::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+    }
+    .view-right::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* SVG Axes and Paths Styling */
+    .axis-line {
+      stroke: rgba(255, 255, 255, 0.15);
+      stroke-dasharray: 2 2;
+    }
+    .axis-text {
+      font-size: 8px;
+      fill: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .sphere-limit {
+      stroke: rgba(255, 255, 255, 0.08);
+      stroke-width: 1;
+      stroke-dasharray: 4 4;
+      fill: none;
+    }
+    .trail-path {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .current-dot {
+      stroke: #ffffff;
+      stroke-width: 1.5;
+    }
+    .grid-line {
+      stroke: rgba(255, 255, 255, 0.03);
+      stroke-width: 0.5;
+    }
+  </style>
+</head>
+
+<body>
+  
+  <header>
+    <div class="brand">
+      <div class="brand-logo"></div>
+      <div class="brand-title">
+        <h1>Tag 3D Orientation & Projections Tracker</h1>
+        <p>Dynamic Vector Analysis & Gravity Projections</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div class="badge">
+        <div class="badge-dot"></div>
+        <span>Timeline Active</span>
+      </div>
+      <a href="/" class="nav-btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+        Line Chart View
+      </a>
+    </div>
+  </header>
+
+  <div class="dashboard">
+    
+    <!-- Left Panel: Interactive 3D Viewport + Scrubber -->
+    <div class="view-left">
+      <div class="scene-container">
+        <div id="viewport-3d"></div>
+        <div class="viewport-overlay">
+          <strong>3D Orientation Space</strong><br>
+          Reference Sphere: Radius 1000 mg (1g)<br>
+          Drag to rotate | Scroll to zoom | Right-click to pan
+        </div>
+      </div>
+      
+      <!-- Timeline Controls -->
+      <div class="controls-panel">
+        <div class="scrubber-row">
+          <button class="play-btn" id="play-btn" title="Play/Pause">▶</button>
+          
+          <div class="scrubber-container">
+            <input type="range" class="scrubber-slider" id="timeline-scrubber" value="0" min="0" max="0">
+            <div class="scrubber-labels">
+              <span id="label-time-current">--:--:--</span>
+              <span id="label-frame-info">Frame 0 / 0</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="controls-row">
+          <div class="controls-group">
+            <div class="control-item">
+              <label for="speed-select">Speed</label>
+              <select id="speed-select">
+                <option value="1">1x</option>
+                <option value="5" selected>5x</option>
+                <option value="15">15x</option>
+                <option value="40">40x</option>
+                <option value="100">100x</option>
+                <option value="300">300x</option>
+              </select>
+            </div>
+            
+            <div class="control-item">
+              <label for="trail-slider">Trail Length</label>
+              <input type="range" id="trail-slider" min="1" max="300" value="80" style="width: 100px;">
+              <span id="trail-value" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; width: 24px;">80</span>
+            </div>
+          </div>
+          
+          <div class="device-selectors">
+            <label class="dev-selector dev-a">
+              <input type="checkbox" id="chk-dev-a" checked>
+              <div class="checkbox-box"></div>
+              <span>BC:57:29:0E:38:6F (A)</span>
+            </label>
+            <label class="dev-selector dev-b">
+              <input type="checkbox" id="chk-dev-b" checked>
+              <div class="checkbox-box"></div>
+              <span>BC:57:29:0E:38:71 (B)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Right Panel: 2D Orthogonal Projections + Live Data -->
+    <div class="view-right">
+      
+      <!-- 2D Projection Plots Panel -->
+      <div class="panel-right">
+        <div class="panel-title">
+          Orthogonal Projections
+          <span>1:1 Scale Representation</span>
+        </div>
+        
+        <div class="projections-container">
+          <!-- Topdown (X-Y) -->
+          <div class="projection-view">
+            <div class="projection-view-header">
+              <span>Topdown view (X-Y Plane)</span>
+              <span>Looking down Z</span>
+            </div>
+            <div id="svg-topdown"></div>
+          </div>
+          
+          <!-- Front (X-Z) -->
+          <div class="projection-view">
+            <div class="projection-view-header">
+              <span>Front view (X-Z Plane)</span>
+              <span>Looking along Y</span>
+            </div>
+            <div id="svg-front"></div>
+          </div>
+          
+          <!-- Side (Y-Z) -->
+          <div class="projection-view">
+            <div class="projection-view-header">
+              <span>Side view (Y-Z Plane)</span>
+              <span>Looking along X</span>
+            </div>
+            <div id="svg-side"></div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Live Metrics Panel -->
+      <div class="panel-right">
+        <div class="panel-title">
+          Live Tag Telemetry
+          <span id="label-active-status">Timeline Paused</span>
+        </div>
+        
+        <div class="metrics-container">
+          <!-- Device A -->
+          <div class="device-metrics-card dev-a" id="metrics-card-a">
+            <div class="card-header" id="metrics-head-a">
+              <h3>BC:57:29:0E:38:6F (A)</h3>
+              <div class="active-badge">No Data</div>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-box"><div class="metric-lbl">X</div><div class="metric-val" id="val-a-x">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">Y</div><div class="metric-val" id="val-a-y">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">Z</div><div class="metric-val" id="val-a-z">-</div></div>
+            </div>
+            <div class="metrics-row-bottom">
+              <div class="metric-box"><div class="metric-lbl">Magnitude</div><div class="metric-val" id="val-a-svm">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">RSSI</div><div class="metric-val" id="val-a-rssi">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">Battery / T</div><div class="metric-val" id="val-a-batt" style="font-size: 11px;">-</div></div>
+            </div>
+          </div>
+          
+          <!-- Device B -->
+          <div class="device-metrics-card dev-b" id="metrics-card-b">
+            <div class="card-header" id="metrics-head-b">
+              <h3>BC:57:29:0E:38:71 (B)</h3>
+              <div class="active-badge">No Data</div>
+            </div>
+            <div class="metrics-grid">
+              <div class="metric-box"><div class="metric-lbl">X</div><div class="metric-val" id="val-b-x">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">Y</div><div class="metric-val" id="val-b-y">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">Z</div><div class="metric-val" id="val-b-z">-</div></div>
+            </div>
+            <div class="metrics-row-bottom">
+              <div class="metric-box"><div class="metric-lbl">Magnitude</div><div class="metric-val" id="val-b-svm">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">RSSI</div><div class="metric-val" id="val-b-rssi">-</div></div>
+              <div class="metric-box"><div class="metric-lbl">Battery / T</div><div class="metric-val" id="val-b-batt" style="font-size: 11px;">-</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+    </div>
+    
+  </div>
+
+  <script>
+    // ===== CONFIG & STATE =====
+    const DEV_A_ID = "BC:57:29:0E:38:6F";
+    const DEV_B_ID = "BC:57:29:0E:38:71";
+    
+    let records = [];
+    let timeline = []; // Synced timeline holding precomputed state of all devices at each timestamp
+    let currentIndex = 0;
+    let isPlaying = false;
+    let playInterval = null;
+    let playbackSpeed = 5; // frame steps per interval tick
+    let tailLength = 80;
+    let activeDevA = true;
+    let activeDevB = true;
+    
+    // Limits computed from dataset to map coordinates nicely
+    const DOMAIN_LIMIT = 1800; // coordinate min/max envelope to represent perfectly square circles
+    const SVG_SIZE = 220;
+    const SVG_PADDING = 20;
+
+    // SVG projection helpers
+    const d3Scales = {
+      x: d3.scaleLinear().domain([-DOMAIN_LIMIT, DOMAIN_LIMIT]).range([SVG_PADDING, SVG_SIZE - SVG_PADDING]),
+      y: d3.scaleLinear().domain([-DOMAIN_LIMIT, DOMAIN_LIMIT]).range([SVG_PADDING, SVG_SIZE - SVG_PADDING]),
+      z: d3.scaleLinear().domain([-DOMAIN_LIMIT, DOMAIN_LIMIT]).range([SVG_SIZE - SVG_PADDING, SVG_PADDING]) // Invert Z to map higher orientation values upward
+    };
+
+    // SVGs Selection
+    const svgTopdown = d3.select("#svg-topdown").append("svg").attr("width", SVG_SIZE).attr("height", SVG_SIZE);
+    const svgFront = d3.select("#svg-front").append("svg").attr("width", SVG_SIZE).attr("height", SVG_SIZE);
+    const svgSide = d3.select("#svg-side").append("svg").attr("width", SVG_SIZE).attr("height", SVG_SIZE);
+
+    // D3 Line generators
+    const topdownLineGen = d3.line().x(d => d3Scales.x(d.x)).y(d => d3Scales.y(d.y));
+    const frontLineGen = d3.line().x(d => d3Scales.x(d.x)).y(d => d3Scales.z(d.z));
+    const sideLineGen = d3.line().x(d => d3Scales.y(d.y)).y(d => d3Scales.z(d.z));
+
+    // ===== THREE.JS 3D SCENE SETTINGS =====
+    let scene, camera, renderer, controls;
+    let sphereReference;
+    const threeDevices = {
+      [DEV_A_ID]: { marker: null, vectorLine: null, trailLine: null, maxPoints: 500 },
+      [DEV_B_ID]: { marker: null, vectorLine: null, trailLine: null, maxPoints: 500 }
+    };
+
+    // Initialize D3 Grid overlays
+    function initD3Grids() {
+      [svgTopdown, svgFront, svgSide].forEach((svg, idx) => {
+        // SVG shadow filter for neon glow
+        const defs = svg.append("defs");
+        
+        const filterA = defs.append("filter").attr("id", "glow-a").attr("x", "-20%").attr("y", "-20%").attr("width", "140%").attr("height", "140%");
+        filterA.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "blur");
+        filterA.append("feMerge").append("feMergeNode").attr("in", "blur");
+        filterA.select("feMerge").append("feMergeNode").attr("in", "SourceGraphic");
+
+        const filterB = defs.append("filter").attr("id", "glow-b").attr("x", "-20%").attr("y", "-20%").attr("width", "140%").attr("height", "140%");
+        filterB.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "blur");
+        filterB.append("feMerge").append("feMergeNode").attr("in", "blur");
+        filterB.select("feMerge").append("feMergeNode").attr("in", "SourceGraphic");
+
+        // Circle limits representing 1000 mg (gravity sphere projection boundary)
+        svg.append("circle")
+          .attr("cx", d3Scales.x(0))
+          .attr("cy", d3Scales.y(0))
+          .attr("r", d3Scales.x(1000) - d3Scales.x(0))
+          .attr("class", "sphere-limit");
+
+        // 1g outer boundary text
+        const horizontalAxis = idx === 2 ? 'Y' : 'X';
+        const verticalAxis = idx === 0 ? 'Y' : 'Z';
+        
+        // Draw grid lines
+        svg.append("line").attr("x1", 0).attr("y1", d3Scales.y(0)).attr("x2", SVG_SIZE).attr("y2", d3Scales.y(0)).attr("class", "axis-line");
+        svg.append("line").attr("x1", d3Scales.x(0)).attr("y1", 0).attr("x2", d3Scales.x(0)).attr("y2", SVG_SIZE).attr("class", "axis-line");
+
+        // Labels
+        svg.append("text").attr("x", SVG_SIZE - 12).attr("y", d3Scales.y(0) - 4).attr("class", "axis-text").attr("text-anchor", "end").text("+" + horizontalAxis);
+        svg.append("text").attr("x", 12).attr("y", d3Scales.y(0) - 4).attr("class", "axis-text").attr("text-anchor", "start").text("-" + horizontalAxis);
+        svg.append("text").attr("x", d3Scales.x(0) + 4).attr("y", 12).attr("class", "axis-text").text(verticalAxis === 'Z' ? "+Z" : "-Y"); // In D3 screen coordinate Y points down
+        svg.append("text").attr("x", d3Scales.x(0) + 4).attr("y", SVG_SIZE - 6).attr("class", "axis-text").text(verticalAxis === 'Z' ? "-Z" : "+Y");
+
+        // Trail path groups
+        svg.append("g").attr("id", `trails-group-${idx}`);
+        svg.append("g").attr("id", `dots-group-${idx}`);
+      });
+    }
+
+    // Initialize 3D Viewport
+    function initThreeScene() {
+      const container = document.getElementById("viewport-3d");
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x05070f);
+      scene.fog = new THREE.FogExp2(0x05070f, 0.00015);
+
+      camera = new THREE.PerspectiveCamera(45, width / height, 1, 10000);
+      camera.position.set(1600, 1200, 1600);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.maxDistance = 4000;
+      controls.minDistance = 200;
+
+      // Ambient Lights
+      const ambientLight = new THREE.AmbientLight(0x0a1128, 2);
+      scene.add(ambientLight);
+
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+      dirLight1.position.set(2000, 2000, 2000);
+      scene.add(dirLight1);
+
+      // Grid helpers representing flat reference sheets
+      const gridXZ = new THREE.GridHelper(3000, 30, 0x1e293b, 0x0f172a);
+      gridXZ.position.y = -1200; // Place below the sphere
+      scene.add(gridXZ);
+
+      // Wireframe reference sphere at R = 1000 representing the exact gravity vector bounds
+      const sphereGeo = new THREE.SphereGeometry(1000, 32, 24);
+      const sphereMat = new THREE.MeshBasicMaterial({
+        color: 0x334155,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.1,
+        depthWrite: false
+      });
+      sphereReference = new THREE.Mesh(sphereGeo, sphereMat);
+      scene.add(sphereReference);
+
+      // Thin solid circle rings for standard orthogonal plane traces in 3D
+      const createOrbitRing = (rotAxis, color) => {
+        const ringGeo = new THREE.RingGeometry(995, 1005, 64);
+        const ringMat = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.15 });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        if (rotAxis === 'x') ring.rotation.x = Math.PI / 2;
+        if (rotAxis === 'y') ring.rotation.y = Math.PI / 2;
+        scene.add(ring);
+      };
+      createOrbitRing('x', 0x3b82f6); // X-Z Ring
+      createOrbitRing('z', 0x10b981); // X-Y Ring
+
+      // Setup device visual nodes
+      // Device A (Cyan)
+      setupDeviceNode(DEV_A_ID, 0x00f0ff);
+      // Device B (Pink)
+      setupDeviceNode(DEV_B_ID, 0xff007f);
+
+      // Resize listener
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function setupDeviceNode(devID, colorHex) {
+      // Glow mesh sphere
+      const markerGeo = new THREE.SphereGeometry(30, 16, 16);
+      const markerMat = new THREE.MeshBasicMaterial({ color: colorHex, toneMapped: false });
+      const marker = new THREE.Mesh(markerGeo, markerMat);
+      scene.add(marker);
+
+      // Radial vector line from origin to point
+      const lineMat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0.45, linewidth: 2 });
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+      const vectorLine = new THREE.Line(lineGeo, lineMat);
+      scene.add(vectorLine);
+
+      // Pre-allocated trail buffers
+      const maxPts = threeDevices[devID].maxPoints;
+      const trailMat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0.8, linewidth: 3 });
+      const trailGeo = new THREE.BufferGeometry();
+      const positions = new Float32Array(maxPts * 3);
+      trailGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const trailLine = new THREE.Line(trailGeo, trailMat);
+      scene.add(trailLine);
+
+      threeDevices[devID].marker = marker;
+      threeDevices[devID].vectorLine = vectorLine;
+      threeDevices[devID].trailLine = trailLine;
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById("viewport-3d");
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    // ===== DATA LOADER & PROCESSING =====
+    function loadData() {
+      d3.text('data.jsonl').then(text => {
+        records = text.trim().split('\n').filter(Boolean).map(JSON.parse);
+        
+        // Group chronologically and track state per timeline index
+        const lastDeviceStates = {};
+        timeline = [];
+        
+        records.forEach((r) => {
+          const t = new Date(r.timestamp);
+          
+          // Accel parameters. Negate Z to match index.html graph convention where z is inverted for display depth.
+          const x = r.x;
+          const y = r.y;
+          const z = -r.z; 
+          
+          lastDeviceStates[r.deviceID] = {
+            x: x,
+            y: y,
+            z: z,
+            battery: r.battery,
+            temp: r.temperature,
+            rssi: r.rawRssi,
+            svm: Math.sqrt(x*x + y*y + z*z),
+            lastUpdated: t
+          };
+
+          timeline.push({
+            time: t,
+            label: r.timestamp.replace('T', ' ').replace(/\.\d+Z/, ''),
+            states: JSON.parse(JSON.stringify(lastDeviceStates)) // Snapshot active states
+          });
+        });
+
+        // Initialize Timeline Slider bounds
+        const scrubber = document.getElementById("timeline-scrubber");
+        scrubber.max = timeline.length - 1;
+        scrubber.value = 0;
+        
+        // Show total frames
+        document.getElementById("label-frame-info").textContent = `Frame 1 / ${timeline.length}`;
+        
+        // Draw first frame
+        updateViews(0);
+        
+        // Start animation loop
+        animate3D();
+      }).catch(err => {
+        console.error("Error loading JSONL data: ", err);
+      });
+    }
+
+    // Extract coordinate trail points back from a given index
+    function getTrailPoints(devID, index, len) {
+      const pts = [];
+      const startIdx = Math.max(0, index - len);
+      
+      for (let i = startIdx; i <= index; i++) {
+        const state = timeline[i].states[devID];
+        if (state) {
+          pts.push({ x: state.x, y: state.y, z: state.z });
+        }
+      }
+      return pts;
+    }
+
+    // ===== VIEW SYNCHRONIZER (COORDINATION CORE) =====
+    function updateViews(index) {
+      if (!timeline || timeline.length === 0) return;
+      
+      currentIndex = index;
+      const frame = timeline[index];
+      
+      // Update Scrubber position and metadata
+      document.getElementById("timeline-scrubber").value = index;
+      document.getElementById("label-time-current").textContent = frame.label;
+      document.getElementById("label-frame-info").textContent = `Frame ${index + 1} / ${timeline.length}`;
+
+      // Toggles check
+      activeDevA = document.getElementById("chk-dev-a").checked;
+      activeDevB = document.getElementById("chk-dev-b").checked;
+
+      // Extract current active states
+      const stateA = frame.states[DEV_A_ID];
+      const stateB = frame.states[DEV_B_ID];
+
+      // Update Telemetry Metrics Panel
+      updateMetricsWidget(DEV_A_ID, stateA, activeDevA, 'a');
+      updateMetricsWidget(DEV_B_ID, stateB, activeDevB, 'b');
+
+      // Update 3D Viewport nodes & paths
+      updateThreeNodes(DEV_A_ID, stateA, activeDevA, index);
+      updateThreeNodes(DEV_B_ID, stateB, activeDevB, index);
+
+      // Update 2D Projections (D3 SVGs)
+      updateD3Projections(index);
+    }
+
+    function updateMetricsWidget(devID, state, isEnabled, suffix) {
+      const card = document.getElementById(`metrics-card-${suffix}`);
+      const header = document.getElementById(`metrics-head-${suffix}`);
+      const badge = header.querySelector(".active-badge");
+
+      if (!isEnabled || !state) {
+        card.style.opacity = "0.35";
+        header.classList.remove("active");
+        badge.textContent = "Disabled";
+        document.getElementById(`val-${suffix}-x`).textContent = "-";
+        document.getElementById(`val-${suffix}-y`).textContent = "-";
+        document.getElementById(`val-${suffix}-z`).textContent = "-";
+        document.getElementById(`val-${suffix}-svm`).textContent = "-";
+        document.getElementById(`val-${suffix}-rssi`).textContent = "-";
+        document.getElementById(`val-${suffix}-batt`).textContent = "-";
+        return;
+      }
+
+      card.style.opacity = "1";
+      header.classList.add("active");
+      badge.textContent = "Active";
+
+      document.getElementById(`val-${suffix}-x`).textContent = Math.round(state.x);
+      document.getElementById(`val-${suffix}-y`).textContent = Math.round(state.y);
+      document.getElementById(`val-${suffix}-z`).textContent = Math.round(state.z);
+      document.getElementById(`val-${suffix}-svm`).textContent = Math.round(state.svm) + " mg";
+      document.getElementById(`val-${suffix}-rssi`).textContent = state.rssi + " dBm";
+      document.getElementById(`val-${suffix}-batt`).innerHTML = `${state.battery} mV<br>${state.temp}°C`;
+    }
+
+    function updateThreeNodes(devID, state, isEnabled, index) {
+      const node = threeDevices[devID];
+      if (!node) return;
+
+      if (!isEnabled || !state) {
+        node.marker.visible = false;
+        node.vectorLine.visible = false;
+        node.trailLine.visible = false;
+        return;
+      }
+
+      // Marker sphere position
+      node.marker.position.set(state.x, state.y, state.z);
+      node.marker.visible = true;
+
+      // Radial vector line representation
+      const vecLinePos = node.vectorLine.geometry.attributes.position;
+      vecLinePos.setXYZ(0, 0, 0, 0); // start at origin
+      vecLinePos.setXYZ(1, state.x, state.y, state.z); // point current position
+      vecLinePos.needsUpdate = true;
+      node.vectorLine.visible = true;
+
+      // Trailing path representation
+      const trailPoints = getTrailPoints(devID, index, tailLength);
+      const maxPts = node.maxPoints;
+      const trailPos = node.trailLine.geometry.attributes.position;
+
+      for (let i = 0; i < maxPts; i++) {
+        if (i < trailPoints.length) {
+          trailPos.setXYZ(i, trailPoints[i].x, trailPoints[i].y, trailPoints[i].z);
+        } else {
+          // pad the remaining coordinates with current coordinate to avoid spikes to origin
+          trailPos.setXYZ(i, state.x, state.y, state.z);
+        }
+      }
+      trailPos.needsUpdate = true;
+      node.trailLine.geometry.setDrawRange(0, trailPoints.length);
+      node.trailLine.visible = true;
+    }
+
+    function updateD3Projections(index) {
+      const ptsA = activeDevA ? getTrailPoints(DEV_A_ID, index, tailLength) : [];
+      const ptsB = activeDevB ? getTrailPoints(DEV_B_ID, index, tailLength) : [];
+
+      // Helper to render D3 trails and dots on specific SVGs
+      const drawProjectionPanel = (svgIdx, xAttr, yAttr, lineGen) => {
+        const trailsGrp = d3.select(`#trails-group-${svgIdx}`);
+        const dotsGrp = d3.select(`#dots-group-${svgIdx}`);
+
+        // Clean previous
+        trailsGrp.selectAll("*").remove();
+        dotsGrp.selectAll("*").remove();
+
+        // 1. Trails
+        if (activeDevA && ptsA.length > 1) {
+          trailsGrp.append("path")
+            .datum(ptsA)
+            .attr("class", "trail-path")
+            .attr("stroke", "var(--dev-cyan)")
+            .attr("stroke-width", 2.2)
+            .attr("filter", "url(#glow-a)")
+            .attr("d", lineGen);
+        }
+        if (activeDevB && ptsB.length > 1) {
+          trailsGrp.append("path")
+            .datum(ptsB)
+            .attr("class", "trail-path")
+            .attr("stroke", "var(--dev-pink)")
+            .attr("stroke-width", 2.2)
+            .attr("filter", "url(#glow-b)")
+            .attr("d", lineGen);
+        }
+
+        // 2. Current Positions Dots
+        if (activeDevA && ptsA.length > 0) {
+          const curr = ptsA[ptsA.length - 1];
+          dotsGrp.append("circle")
+            .attr("cx", d3Scales[xAttr](curr[xAttr]))
+            .attr("cy", d3Scales[yAttr](curr[yAttr]))
+            .attr("r", 5)
+            .attr("fill", "var(--dev-cyan)")
+            .attr("class", "current-dot");
+        }
+        if (activeDevB && ptsB.length > 0) {
+          const curr = ptsB[ptsB.length - 1];
+          dotsGrp.append("circle")
+            .attr("cx", d3Scales[xAttr](curr[xAttr]))
+            .attr("cy", d3Scales[yAttr](curr[yAttr]))
+            .attr("r", 5)
+            .attr("fill", "var(--dev-pink)")
+            .attr("class", "current-dot");
+        }
+      };
+
+      // Draw Topdown (X-Y)
+      drawProjectionPanel(0, 'x', 'y', topdownLineGen);
+      
+      // Draw Front (X-Z)
+      drawProjectionPanel(1, 'x', 'z', frontLineGen);
+
+      // Draw Side (Y-Z)
+      drawProjectionPanel(2, 'y', 'z', sideLineGen);
+    }
+
+    // ===== 3D ANIMATION LOOP =====
+    function animate3D() {
+      requestAnimationFrame(animate3D);
+      
+      if (controls) controls.update();
+      if (renderer && scene && camera) renderer.render(scene, camera);
+      
+      // Muted self rotation to wireframe reference sphere for premium spatial feedback
+      if (sphereReference) {
+        sphereReference.rotation.y += 0.0006;
+      }
+    }
+
+    // ===== TIMELINE CONTROLLER ACTIONS =====
+    function play() {
+      if (isPlaying) return;
+      isPlaying = true;
+      document.getElementById("play-btn").textContent = "▮▮";
+      document.getElementById("label-active-status").textContent = "Timeline Running";
+      document.getElementById("label-active-status").style.color = "var(--accent-green)";
+
+      playInterval = setInterval(() => {
+        let nextIndex = currentIndex + playbackSpeed;
+        if (nextIndex >= timeline.length) {
+          nextIndex = 0; // Loop timeline
+        }
+        updateViews(nextIndex);
+      }, 50);
+    }
+
+    function pause() {
+      if (!isPlaying) return;
+      isPlaying = false;
+      document.getElementById("play-btn").textContent = "▶";
+      document.getElementById("label-active-status").textContent = "Timeline Paused";
+      document.getElementById("label-active-status").style.color = "var(--text-muted)";
+      
+      clearInterval(playInterval);
+    }
+
+    // Set up listeners for controls
+    function setupControllerListeners() {
+      // Play/Pause button
+      document.getElementById("play-btn").addEventListener("click", () => {
+        if (isPlaying) pause();
+        else play();
+      });
+
+      // Timeline Scrubber input
+      document.getElementById("timeline-scrubber").addEventListener("input", (e) => {
+        pause();
+        updateViews(parseInt(e.target.value));
+      });
+
+      // Playback speed
+      document.getElementById("speed-select").addEventListener("change", (e) => {
+        playbackSpeed = parseInt(e.target.value);
+      });
+
+      // Trail length slider
+      const trailSlider = document.getElementById("trail-slider");
+      trailSlider.addEventListener("input", (e) => {
+        tailLength = parseInt(e.target.value);
+        document.getElementById("trail-value").textContent = tailLength;
+        updateViews(currentIndex);
+      });
+
+      // Device checkboxes
+      document.getElementById("chk-dev-a").addEventListener("change", () => updateViews(currentIndex));
+      document.getElementById("chk-dev-b").addEventListener("change", () => updateViews(currentIndex));
+    }
+
+    // ===== MAIN BOOT =====
+    window.addEventListener("DOMContentLoaded", () => {
+      initD3Grids();
+      initThreeScene();
+      setupControllerListeners();
+      loadData();
+    });
+  </script>
+</body>
+</html>
